@@ -64,7 +64,6 @@ def save_config(cfg: dict):
         json.dump(cfg, f, ensure_ascii=False, indent=2)
 
 
-cfg = load_config()
 import os
 PASSWORD = os.getenv("APP_PASSWORD", "1234")
 
