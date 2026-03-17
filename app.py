@@ -4,12 +4,11 @@ from pathlib import Path
 
 from database import init_db
 from utils import UZ_MONTHS
-
+from modules_dashboard import render_dashboard
 # Asosiy modullar
 from modules_settings import render_settings
 from modules_ambulator import render_ambulator
 from modules_statsionar import render_statsionar
-from modules_dashboard import render_dashboard
 
 # Foiz modullari
 from modules_foiz import render_foiz
@@ -18,12 +17,22 @@ from modules_foiz_ambulator import render_foiz_ambulator
 # Yangi modullar
 from modules_poliklinika_doctor import render_poliklinika_doctor
 from modules_jami_protokol import render_jami_protokol
+from modules_extra_settings import render_extra_settings
 
-# MUHIM
-st.set_page_config(page_title="Kasalxona Hisobot Tizimi", layout="wide")
 
-# DB init
+# =========================
+# PAGE CONFIG
+# =========================
+st.set_page_config(
+    page_title="Kasalxona Hisobot Tizimi",
+    layout="wide"
+)
+
+# =========================
+# DB INIT
+# =========================
 init_db(force_recreate=False)
+
 
 # =========================
 # HEADER
@@ -47,6 +56,7 @@ with col2:
 
 st.divider()
 
+
 # =========================
 # SIDEBAR
 # =========================
@@ -55,7 +65,7 @@ st.sidebar.header("📅 Hisobot oyi")
 year = st.sidebar.selectbox(
     "Yil",
     options=list(range(2024, 2031)),
-    index=list(range(2024, 2031)).index(2026) if 2026 in range(2024, 2031) else 0
+    index=list(range(2024, 2031)).index(2026)
 )
 
 month_name = st.sidebar.selectbox(
@@ -65,6 +75,7 @@ month_name = st.sidebar.selectbox(
 )
 
 st.sidebar.divider()
+
 st.sidebar.header("📌 Menyu")
 
 menu = st.sidebar.radio(
@@ -78,10 +89,12 @@ menu = st.sidebar.radio(
         "Poliklinika(OPD)",
         "Jami protokol",
         "Sozlamalar",
+        "Moliyaviy sozlamalar"
     ],
     index=1,
     key="menu"
 )
+
 
 # =========================
 # PAGES
@@ -92,20 +105,30 @@ if menu == "Dashboard":
 elif menu == "Statsionar":
     render_statsionar(year, month_name)
 
+
 elif menu == "Statsionar — Foiz":
     render_foiz(year, month_name, UZ_MONTHS)
+
 
 elif menu == "Ambulator (OPD)":
     render_ambulator(year, month_name)
 
+
 elif menu == "Ambulator — Foiz":
     render_foiz_ambulator(year, month_name, UZ_MONTHS)
+
 
 elif menu == "Poliklinika(OPD)":
     render_poliklinika_doctor(year, month_name, UZ_MONTHS)
 
+
 elif menu == "Jami protokol":
     render_jami_protokol(year, month_name, UZ_MONTHS)
 
+
 elif menu == "Sozlamalar":
     render_settings(year, month_name, UZ_MONTHS)
+
+
+elif menu == "Moliyaviy sozlamalar":
+    render_extra_settings(year, month_name, UZ_MONTHS)
