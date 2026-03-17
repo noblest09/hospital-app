@@ -709,7 +709,7 @@ def render_dashboard(year: int, month_name: str, uz_months: list[str]):
 
     st.markdown('<div class="db-title">📊 Boshqaruv paneli</div>', unsafe_allow_html=True)
     st.markdown(
-        '<div class="db-subtitle">Rahbar uchun asosiy moliyaviy ko‘rsatkichlar, bo‘limlar reytingi, dori tahlili, top xizmatlar va vrachlar</div>',
+        '<div class="db-subtitle">Asosiy moliyaviy ko‘rsatkichlar, bo‘limlar reytingi, dori tahlili, top xizmatlar va vrachlar</div>',
         unsafe_allow_html=True,
     )
 
