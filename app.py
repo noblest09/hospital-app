@@ -24,7 +24,8 @@ from modules_extra_settings import render_extra_settings
 # PAGE CONFIG
 # =========================
 st.set_page_config(
-    page_title="Kasalxona Hisobot Tizimi",
+    page_title="Bolalar Milliy Tibbiyot Markazi",
+    page_icon="assets/logo.png",
     layout="wide"
 )
 
