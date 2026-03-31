@@ -6,8 +6,9 @@ DB_PATH = Path(__file__).with_name("hospital.db")
 
 
 def get_conn() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout = 30000")
     return conn
 
 
@@ -258,14 +259,13 @@ def init_db(force_recreate: bool = False):
     # =========================================================
     # POLIKLINIKA(OPD) VRACH FOIZLARI
     # =========================================================
-    # ESKI versiyada role yo'q bo'lishi mumkin, shuning uchun migratsiya qilamiz
     if not _table_exists(conn, "doctor_percent_rules"):
         cur.execute("""
         CREATE TABLE IF NOT EXISTS doctor_percent_rules (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           year INTEGER NOT NULL,
           month INTEGER NOT NULL,
-          source_key TEXT NOT NULL,         -- 'amb_exec' / 'amb_ref' / 'stat_exec'
+          source_key TEXT NOT NULL,
           doctor_name TEXT NOT NULL,
           percent REAL NOT NULL DEFAULT 0,
           UNIQUE(year, month, source_key, doctor_name)
@@ -273,8 +273,6 @@ def init_db(force_recreate: bool = False):
         """)
     else:
         cols = _table_columns(conn, "doctor_percent_rules")
-
-        # Agar eski juda eski jadval bo'lsa va kerakli ustunlar yo'q bo'lsa
         if "year" not in cols:
             _add_column_if_missing(conn, "doctor_percent_rules", "year INTEGER DEFAULT 2026", "year")
         if "month" not in cols:
