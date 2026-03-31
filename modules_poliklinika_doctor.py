@@ -50,7 +50,6 @@ def _extract_name_parts(name: str) -> dict:
 
     norm = _normalize_text(raw)
 
-    # B.J.Akbarxonov / B J Akbarxonov
     m = re.match(
         r"^\s*([A-Za-zА-Яа-яЁёҚқҒғҲҳЎў])\.?\s*([A-Za-zА-Яа-яЁёҚқҒғҲҳЎў])\.?\s*([A-Za-zА-Яа-яЁёҚқҒғҲҳЎў\-]+)\s*$",
         norm
@@ -72,7 +71,6 @@ def _extract_name_parts(name: str) -> dict:
     parts = [p for p in norm.split() if p.strip()]
     parts_clean = [_clean_name_token(p) for p in parts if _clean_name_token(p)]
 
-    # Akbarxonov Bunyod Jamoliddin ...
     if len(parts_clean) >= 3:
         surname = parts_clean[0]
         i1 = parts_clean[1][:1] if parts_clean[1] else ""
@@ -131,11 +129,9 @@ def _is_same_doctor(a: dict, b: dict) -> bool:
     if a["surname4"] != b["surname4"]:
         return False
 
-    # familiya boshi mos bo‘lishi kerak
     if not (a["surname"].startswith(b["surname4"]) or b["surname"].startswith(a["surname4"])):
         return False
 
-    # bosh harflar mosligi
     if a["i1"] and b["i1"] and a["i1"] != b["i1"]:
         return False
     if a["i2"] and b["i2"] and a["i2"] != b["i2"]:
@@ -148,16 +144,10 @@ def _choose_best_display(names: list[str]) -> str:
     cleaned = [str(x).strip() for x in names if str(x).strip()]
     if not cleaned:
         return ""
-    # eng uzunini afzal ko'ramiz
     return sorted(cleaned, key=lambda x: (-len(x), x))[0]
 
 
 def _build_doctor_registry(df_all: pd.DataFrame) -> dict:
-    """
-    raw_name -> {"doctor_key": ..., "doctor_display": ...}
-    Agar to'liq ism topilsa, qisqartirilgan ham shu to'liq ismga ulanadi.
-    Topilmasa qisqartirilgan o'z holicha qoladi.
-    """
     names = []
 
     if "ijrochi_vrach" in df_all.columns:
@@ -178,7 +168,6 @@ def _build_doctor_registry(df_all: pd.DataFrame) -> dict:
     canonical_groups = []
     used_full = set()
 
-    # to'liq ismli group
     for nm in full_names:
         if nm in used_full:
             continue
@@ -198,7 +187,6 @@ def _build_doctor_registry(df_all: pd.DataFrame) -> dict:
         canonical_key = f"{base['surname4']}|{base['i1']}|{base['i2']}"
         canonical_groups.append((canonical_key, canonical_display, group, base))
 
-    # qisqartirilganlarni full groupga bog'lash
     for nm in abbr_names:
         p = parts_map[nm]
         matched = None
@@ -209,7 +197,6 @@ def _build_doctor_registry(df_all: pd.DataFrame) -> dict:
                 break
 
         if matched is None:
-            # moslik topilmadi -> o'zicha qoladi
             canonical_key = f"{p['surname4']}|{p['i1']}|{p['i2']}"
             canonical_display = nm
             canonical_groups.append((canonical_key, canonical_display, [nm], p))
@@ -220,7 +207,6 @@ def _build_doctor_registry(df_all: pd.DataFrame) -> dict:
             "doctor_display": matched[1],
         }
 
-    # full larni yozamiz
     for canonical_key, canonical_display, group, _base in canonical_groups:
         for nm in group:
             registry[nm] = {
@@ -228,7 +214,6 @@ def _build_doctor_registry(df_all: pd.DataFrame) -> dict:
                 "doctor_display": canonical_display,
             }
 
-    # boshqa nomlar
     for nm in other_names:
         p = parts_map[nm]
         key = f"{p['surname4']}|{p['i1']}|{p['i2']}|{_clean_name_token(nm)[:10]}"
@@ -366,12 +351,7 @@ def _load_rules(year: int, month: int, source_key: str) -> pd.DataFrame:
     df["doctor_display"] = df["doctor_display"].astype(str).str.strip()
     df["percent"] = pd.to_numeric(df["percent"], errors="coerce").fillna(0.0)
 
-    return (
-        df.groupby("doctor_key", as_index=False)
-        .agg({"doctor_display": lambda x: _choose_best_display(list(x)), "percent": "max"})
-        .sort_values("doctor_display")
-        .reset_index(drop=True)
-    )
+    return df
 
 
 def _save_rules(year: int, month: int, source_key: str, df: pd.DataFrame):
@@ -432,16 +412,7 @@ def _load_manual_extra(year: int, month: int) -> pd.DataFrame:
     df["avans"] = pd.to_numeric(df["avans"], errors="coerce").fillna(0.0)
     df["rentabillik"] = pd.to_numeric(df["rentabillik"], errors="coerce").fillna(0.0)
 
-    return (
-        df.groupby("doctor_key", as_index=False)
-        .agg({
-            "doctor_display": lambda x: _choose_best_display(list(x)),
-            "avans": "sum",
-            "rentabillik": "sum"
-        })
-        .sort_values("doctor_display")
-        .reset_index(drop=True)
-    )
+    return df
 
 
 def _save_manual_extra(year: int, month: int, df: pd.DataFrame):
@@ -451,17 +422,6 @@ def _save_manual_extra(year: int, month: int, df: pd.DataFrame):
     df2["avans"] = pd.to_numeric(df2["avans"], errors="coerce").fillna(0.0)
     df2["rentabillik"] = pd.to_numeric(df2["rentabillik"], errors="coerce").fillna(0.0)
     df2 = df2[(df2["doctor_key"] != "") & (df2["doctor_display"] != "")].copy()
-
-    df2 = (
-        df2.groupby("doctor_key", as_index=False)
-        .agg({
-            "doctor_display": lambda x: _choose_best_display(list(x)),
-            "avans": "sum",
-            "rentabillik": "sum"
-        })
-        .sort_values("doctor_display")
-        .reset_index(drop=True)
-    )
 
     conn = get_conn()
     cur = conn.cursor()
@@ -851,7 +811,7 @@ def _render_detail_block(title: str, df_preview: pd.DataFrame, selected_services
 
 
 # =========================================================
-# CALCULATION
+# CALCULATION - TUZATILGAN QISM!
 # =========================================================
 def _build_source_summary(preview_df: pd.DataFrame, selected_services: list[str], rules_df: pd.DataFrame, source_col_name: str) -> tuple[pd.DataFrame, pd.DataFrame]:
     if preview_df.empty or not selected_services:
@@ -864,15 +824,23 @@ def _build_source_summary(preview_df: pd.DataFrame, selected_services: list[str]
         empty_sum = pd.DataFrame(columns=["doctor_key", "doctor_display", source_col_name, "Protokol summasi", "Markazda qoladi"])
         return empty_sum, pd.DataFrame()
 
+    # Foizlarni qo'llash - TUZATILDI
     if rules_df.empty:
         d["Foiz (%)"] = 0.0
     else:
-        r = rules_df[["doctor_key", "percent"]].copy()
-        r["doctor_key"] = r["doctor_key"].astype(str).str.strip()
-        r["percent"] = pd.to_numeric(r["percent"], errors="coerce").fillna(0.0)
-        d = d.merge(r, on="doctor_key", how="left")
-        d["percent"] = d["percent"].fillna(0.0)
-        d = d.rename(columns={"percent": "Foiz (%)"})
+        # rules_df dan foizlarni olish
+        for _, rule in rules_df.iterrows():
+            doctor_key = rule["doctor_key"]
+            percent = rule["percent"]
+            # preview dagi mos doctor_key larga foizni qo'yish
+            mask = d["doctor_key"] == doctor_key
+            d.loc[mask, "Foiz (%)"] = percent
+        
+        # Agar foiz qo'yilmagan bo'lsa, 0 qo'yish
+        if "Foiz (%)" not in d.columns:
+            d["Foiz (%)"] = 0.0
+        else:
+            d["Foiz (%)"] = d["Foiz (%)"].fillna(0.0)
 
     d["Protokol summasi"] = d["Jami summa"] * d["Foiz (%)"] / 100.0
     d["Markazda qoladi"] = d["Jami summa"] - d["Protokol summasi"]
@@ -889,6 +857,10 @@ def _build_source_summary(preview_df: pd.DataFrame, selected_services: list[str]
         )
     )
     summ = summ.rename(columns={"xizmat_sum": source_col_name, "prot_sum": "Protokol summasi", "markaz_sum": "Markazda qoladi"})
+    
+    # Faqat Protokol summasi > 0 bo'lganlarni qaytarish
+    summ = summ[summ["Protokol summasi"] > 0].copy()
+    
     return summ, detail
 
 
@@ -948,6 +920,9 @@ def _merge_three_sources(sum_amb_exec: pd.DataFrame, sum_amb_ref: pd.DataFrame, 
         base[col] = pd.to_numeric(base[col], errors="coerce").fillna(0.0)
 
     base["Jami xizmat summasi"] = base["Ambulator ijrochi"] + base["Ambulator yo‘naltirgan"] + base["Statsionar ijrochi"]
+    
+    # Faqat Jami protokol summasi > 0 bo'lganlarni qaytarish
+    base = base[base["Jami protokol summasi"] > 0].copy()
 
     return base.sort_values("doctor_display").reset_index(drop=True)
 
@@ -1432,15 +1407,26 @@ def render_poliklinika_doctor(selected_year: int, selected_month_name: str, uz_m
 
         manual_df = _load_manual_extra(selected_year, month)
 
+        # Faqat foiz > 0 bo'lgan vrachlarni olish
+        doctors_with_percent = set()
+        for rules_df in [rules_amb_exec, rules_amb_ref, rules_stat_exec]:
+            if not rules_df.empty:
+                positive = rules_df[rules_df["percent"] > 0]["doctor_key"].tolist()
+                doctors_with_percent.update(positive)
+
         sum_ae, det_ae = _build_source_summary(amb_exec_preview, sel_amb_exec, rules_amb_exec, "Ambulator ijrochi")
         sum_ar, det_ar = _build_source_summary(amb_ref_preview, sel_amb_ref, rules_amb_ref, "Ambulator yo‘naltirgan")
         sum_se, det_se = _build_source_summary(stat_exec_preview, sel_stat_exec, rules_stat_exec, "Statsionar ijrochi")
 
         unified_summary = _merge_three_sources(sum_ae, sum_ar, sum_se)
+        
+        # Faqat foiz berilgan vrachlarni filtrlash
+        if doctors_with_percent and not unified_summary.empty:
+            unified_summary = unified_summary[unified_summary["doctor_key"].isin(doctors_with_percent)].copy()
 
         st.markdown("### Vrachlar bo‘yicha Avans va Rentabillik")
         if unified_summary.empty:
-            st.info("Hisoblash uchun tanlangan xizmatlar bo‘yicha vrachlar topilmadi.")
+            st.info("Foiz berilgan vrachlar topilmadi.")
         else:
             manual_editor = _manual_editor_from_summary(unified_summary, manual_df)
 
@@ -1481,6 +1467,11 @@ def render_poliklinika_doctor(selected_year: int, selected_month_name: str, uz_m
             sum_se_now, det_se_now = _build_source_summary(stat_exec_preview, sel_stat_exec, rules_stat_exec, "Statsionar ijrochi")
 
             unified_now = _merge_three_sources(sum_ae_now, sum_ar_now, sum_se_now)
+            
+            # Faqat foiz berilgan vrachlarni filtrlash
+            if doctors_with_percent and not unified_now.empty:
+                unified_now = unified_now[unified_now["doctor_key"].isin(doctors_with_percent)].copy()
+            
             unified_now = _apply_manual_extra(unified_now, manual_now)
 
             amb_protocol_total = float(sum_ae_now["Protokol summasi"].sum()) + float(sum_ar_now["Protokol summasi"].sum())
@@ -1490,7 +1481,7 @@ def render_poliklinika_doctor(selected_year: int, selected_month_name: str, uz_m
             stat_center_total = float(sum_se_now["Markazda qoladi"].sum())
 
             total_protocol = amb_protocol_total + stat_protocol_total
-            total_final = float(unified_now["Yakuniy protokol"].sum())
+            total_final = float(unified_now["Yakuniy protokol"].sum()) if not unified_now.empty else 0.0
 
             if total_protocol > 0:
                 amb_final_total = total_final * amb_protocol_total / total_protocol
@@ -1625,10 +1616,14 @@ def render_poliklinika_doctor(selected_year: int, selected_month_name: str, uz_m
         st.markdown("### 4) Barchasini bir Excelga yuklash")
         output = BytesIO()
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
-            calc["summary"].to_excel(writer, index=False, sheet_name="Vrach_Protokol")
-            calc["det_amb_exec"].to_excel(writer, index=False, sheet_name="Amb_Exec_Detal")
-            calc["det_amb_ref"].to_excel(writer, index=False, sheet_name="Amb_Ref_Detal")
-            calc["det_stat_exec"].to_excel(writer, index=False, sheet_name="Stat_Exec_Detal")
+            if not calc["summary"].empty:
+                calc["summary"].to_excel(writer, index=False, sheet_name="Vrach_Protokol")
+            if not calc["det_amb_exec"].empty:
+                calc["det_amb_exec"].to_excel(writer, index=False, sheet_name="Amb_Exec_Detal")
+            if not calc["det_amb_ref"].empty:
+                calc["det_amb_ref"].to_excel(writer, index=False, sheet_name="Amb_Ref_Detal")
+            if not calc["det_stat_exec"].empty:
+                calc["det_stat_exec"].to_excel(writer, index=False, sheet_name="Stat_Exec_Detal")
 
         st.download_button(
             label="Excel yuklab olish",
