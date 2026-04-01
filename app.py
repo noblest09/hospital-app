@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import streamlit as st
 from pathlib import Path
-from functools import lru_cache
+import time
 
 from database import init_db
 from utils import UZ_MONTHS
@@ -22,7 +22,8 @@ from modules_extra_settings import render_extra_settings
 st.set_page_config(
     page_title="Bolalar Milliy Tibbiyot Markazi",
     page_icon="assets/logo.png",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
 # =========================
@@ -32,22 +33,23 @@ init_db(force_recreate=False)
 
 
 # =========================
-# SESSION STATE INIT
+# SESSION STATE INIT - Render uchun muhim!
 # =========================
-# Menyuni session state da saqlash
 if "menu" not in st.session_state:
     st.session_state.menu = "Dashboard"
 
-# Yil va oyni session state da saqlash
 if "selected_year" not in st.session_state:
     st.session_state.selected_year = 2026
 
 if "selected_month" not in st.session_state:
-    st.session_state.selected_month = 0  # Yanvar
+    st.session_state.selected_month = 0
+
+if "page_loaded" not in st.session_state:
+    st.session_state.page_loaded = True
 
 
 # =========================
-# HEADER (o'zgarmaydi)
+# HEADER (tezlashtirilgan)
 # =========================
 st.caption("Statsionar + Ambulator (OPD) | by Tibliyev")
 
@@ -57,8 +59,6 @@ with col1:
     logo_path = Path("assets/logo.png")
     if logo_path.exists():
         st.image(str(logo_path), width=90)
-    else:
-        st.warning("Logo topilmadi: assets/logo.png")
 
 with col2:
     st.markdown(
@@ -70,12 +70,12 @@ st.divider()
 
 
 # =========================
-# SIDEBAR - TEZLASHTIRILGAN
+# SIDEBAR - Render uchun tezlashtirilgan
 # =========================
 with st.sidebar:
     st.header("📅 Hisobot oyi")
     
-    # Yil tanlash (session state bilan)
+    # Yil tanlash
     year = st.selectbox(
         "Yil",
         options=list(range(2024, 2031)),
@@ -83,7 +83,7 @@ with st.sidebar:
         key="year_select"
     )
     
-    # Oy tanlash (session state bilan)
+    # Oy tanlash
     month_name = st.selectbox(
         "Oy",
         options=UZ_MONTHS,
@@ -91,69 +91,44 @@ with st.sidebar:
         key="month_select"
     )
     
-    # O'zgarishlarni session state ga saqlash
+    # O'zgarishlarni saqlash
     if year != st.session_state.selected_year:
         st.session_state.selected_year = year
+        # Yil o'zgarganda keshni tozalash
+        for key in list(st.session_state.keys()):
+            if key.startswith("dashboard_") or key.startswith("preview_"):
+                del st.session_state[key]
         st.rerun()
     
-    if month_name != UZ_MONTHS[st.session_state.selected_month]:
-        st.session_state.selected_month = UZ_MONTHS.index(month_name)
+    month_idx = UZ_MONTHS.index(month_name)
+    if month_idx != st.session_state.selected_month:
+        st.session_state.selected_month = month_idx
+        # Oy o'zgarganda keshni tozalash
+        for key in list(st.session_state.keys()):
+            if key.startswith("dashboard_") or key.startswith("preview_"):
+                del st.session_state[key]
         st.rerun()
     
     st.divider()
     st.header("📌 Menyu")
     
-    # ===== MUHIM: Buttonlar radio'dan TEZROQ =====
-    # Dashboard
-    if st.button("📊 Dashboard", use_container_width=True, key="btn_dashboard"):
-        st.session_state.menu = "Dashboard"
-        st.rerun()
+    # ===== MUHIM: Buttonlar bilan menyu =====
+    menu_items = {
+        "Dashboard": "📊",
+        "Statsionar": "🏥",
+        "Statsionar — Foiz": "📈",
+        "Ambulator (OPD)": "🚑",
+        "Ambulator — Foiz": "📊",
+        "Poliklinika(OPD)": "👨‍⚕️",
+        "Jami protokol": "📑",
+        "Sozlamalar": "⚙️",
+        "Moliyaviy sozlamalar": "💰"
+    }
     
-    # Statsionar
-    if st.button("🏥 Statsionar", use_container_width=True, key="btn_statsionar"):
-        st.session_state.menu = "Statsionar"
-        st.rerun()
-    
-    # Statsionar — Foiz
-    if st.button("📈 Statsionar — Foiz", use_container_width=True, key="btn_foiz"):
-        st.session_state.menu = "Statsionar — Foiz"
-        st.rerun()
-    
-    st.divider()
-    
-    # Ambulator (OPD)
-    if st.button("🚑 Ambulator (OPD)", use_container_width=True, key="btn_ambulator"):
-        st.session_state.menu = "Ambulator (OPD)"
-        st.rerun()
-    
-    # Ambulator — Foiz
-    if st.button("📊 Ambulator — Foiz", use_container_width=True, key="btn_foiz_amb"):
-        st.session_state.menu = "Ambulator — Foiz"
-        st.rerun()
-    
-    st.divider()
-    
-    # Poliklinika(OPD)
-    if st.button("👨‍⚕️ Poliklinika(OPD)", use_container_width=True, key="btn_poliklinika"):
-        st.session_state.menu = "Poliklinika(OPD)"
-        st.rerun()
-    
-    # Jami protokol
-    if st.button("📑 Jami protokol", use_container_width=True, key="btn_jami"):
-        st.session_state.menu = "Jami protokol"
-        st.rerun()
-    
-    st.divider()
-    
-    # Sozlamalar
-    if st.button("⚙️ Sozlamalar", use_container_width=True, key="btn_settings"):
-        st.session_state.menu = "Sozlamalar"
-        st.rerun()
-    
-    # Moliyaviy sozlamalar
-    if st.button("💰 Moliyaviy sozlamalar", use_container_width=True, key="btn_extra"):
-        st.session_state.menu = "Moliyaviy sozlamalar"
-        st.rerun()
+    for menu_name, icon in menu_items.items():
+        if st.button(f"{icon} {menu_name}", use_container_width=True, key=f"btn_{menu_name.replace(' ', '_')}"):
+            st.session_state.menu = menu_name
+            st.rerun()
     
     # Hozirgi menyuni ko'rsatish
     st.divider()
@@ -161,40 +136,29 @@ with st.sidebar:
 
 
 # =========================
-# PAGES - SESSION STATE ORQALI
+# PAGES - session state orqali
 # =========================
-# Session state dan menyuni olish
 menu = st.session_state.menu
-
-# Session state dan yil va oyni olish
 year = st.session_state.selected_year
 month_idx = st.session_state.selected_month
 month_name = UZ_MONTHS[month_idx]
 
-# ===== MUHIM: Progress bar YO'Q, spinner YO'Q =====
+# ===== Render uchun progress bar YO'Q! =====
 if menu == "Dashboard":
     render_dashboard(year, month_name, UZ_MONTHS)
-
 elif menu == "Statsionar":
     render_statsionar(year, month_name)
-
 elif menu == "Statsionar — Foiz":
     render_foiz(year, month_name, UZ_MONTHS)
-
 elif menu == "Ambulator (OPD)":
     render_ambulator(year, month_name)
-
 elif menu == "Ambulator — Foiz":
     render_foiz_ambulator(year, month_name, UZ_MONTHS)
-
 elif menu == "Poliklinika(OPD)":
     render_poliklinika_doctor(year, month_name, UZ_MONTHS)
-
 elif menu == "Jami protokol":
     render_jami_protokol(year, month_name, UZ_MONTHS)
-
 elif menu == "Sozlamalar":
     render_settings(year, month_name, UZ_MONTHS)
-
 elif menu == "Moliyaviy sozlamalar":
     render_extra_settings(year, month_name, UZ_MONTHS)
