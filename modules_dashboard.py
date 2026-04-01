@@ -30,7 +30,7 @@ except Exception:
 
 
 # =========================================================
-# STYLE
+# STYLE (o'zgarmaydi)
 # =========================================================
 def _inject_css():
     st.markdown(
@@ -153,7 +153,7 @@ def _kpi_card(title: str, value, note: str = "", tone: str = "kpi-slate"):
 
 
 # =========================================================
-# HELPERS
+# HELPERS (o'zgarmaydi)
 # =========================================================
 def _safe_sum(df: pd.DataFrame, col: str) -> float:
     if df is None or df.empty or col not in df.columns:
@@ -195,7 +195,18 @@ def _norm_dept_name(x: str) -> str:
     return mapping.get(up, s)
 
 
-def _load_support_finance(year: int, month: int) -> pd.DataFrame:
+# =========================================================
+# CACHED FUNCTIONS - YANGI! TEZLASHTIRISH UCHUN
+# =========================================================
+@st.cache_data(ttl=3600, show_spinner=False)
+def _load_jami_table_cached(year: int, month: int) -> pd.DataFrame:
+    """Keshlangan jami protokol"""
+    return _build_jami_table(year, month)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _load_support_finance_cached(year: int, month: int) -> pd.DataFrame:
+    """Keshlangan yordamchi bo'limlar"""
     conn = get_conn()
     try:
         df = pd.read_sql_query(
@@ -226,7 +237,9 @@ def _load_support_finance(year: int, month: int) -> pd.DataFrame:
     return df[["department", "avans", "protokol"]]
 
 
-def _load_tax_settings(year: int, month: int) -> dict:
+@st.cache_data(ttl=3600, show_spinner=False)
+def _load_tax_settings_cached(year: int, month: int) -> dict:
+    """Keshlangan soliq sozlamalari"""
     conn = get_conn()
     try:
         df = pd.read_sql_query(
@@ -264,10 +277,110 @@ def _load_tax_settings(year: int, month: int) -> dict:
     }
 
 
-# =========================================================
-# DORI MANBALARI
-# =========================================================
-def _load_statsionar_drug_by_department(year: int, month: int) -> pd.DataFrame:
+@st.cache_data(ttl=3600, show_spinner=False)
+def _load_poliklinika_doctors_cached(year: int, month: int) -> pd.DataFrame:
+    """Keshlangan poliklinika vrachlar"""
+    df_all = _load_cached_std(year, month)
+    if df_all is None or df_all.empty:
+        return pd.DataFrame(columns=["doctor_display", "Jami xizmat summasi", "Jami protokol summasi", "Yakuniy protokol"])
+
+    registry = _build_doctor_registry(df_all)
+
+    amb_exec_preview = _preview_exec_amb(df_all, registry)
+    amb_ref_preview = _preview_ref_amb(df_all, registry)
+    stat_exec_preview = _preview_exec_stat(df_all, registry)
+
+    sel_amb_exec = _load_selected_services(year, month, "amb_exec")
+    sel_amb_ref = _load_selected_services(year, month, "amb_ref")
+    sel_stat_exec = _load_selected_services(year, month, "stat_exec")
+
+    rules_amb_exec = _load_rules(year, month, "amb_exec")
+    rules_amb_ref = _load_rules(year, month, "amb_ref")
+    rules_stat_exec = _load_rules(year, month, "stat_exec")
+
+    manual_df = _load_manual_extra(year, month)
+
+    sum_ae, _ = _build_source_summary(amb_exec_preview, sel_amb_exec, rules_amb_exec, "Ambulator ijrochi")
+    sum_ar, _ = _build_source_summary(amb_ref_preview, sel_amb_ref, rules_amb_ref, "Ambulator yo‘naltirgan")
+    sum_se, _ = _build_source_summary(stat_exec_preview, sel_stat_exec, rules_stat_exec, "Statsionar ijrochi")
+
+    unified = _merge_three_sources(sum_ae, sum_ar, sum_se)
+    unified = _apply_manual_extra(unified, manual_df)
+
+    if not unified.empty:
+        unified = unified[pd.to_numeric(unified["Jami protokol summasi"], errors="coerce").fillna(0) > 0].copy()
+
+    doctors_df = unified[[
+        "doctor_display",
+        "Jami xizmat summasi",
+        "Jami protokol summasi",
+        "Yakuniy protokol",
+    ]].copy() if not unified.empty else pd.DataFrame(columns=[
+        "doctor_display", "Jami xizmat summasi", "Jami protokol summasi", "Yakuniy protokol"
+    ])
+
+    doctors_df = doctors_df.sort_values("Jami protokol summasi", ascending=False).reset_index(drop=True)
+    return doctors_df
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _load_ambulator_top_services_cached(year: int, month: int) -> pd.DataFrame:
+    """Keshlangan ambulator top xizmatlar"""
+    conn = get_conn()
+    try:
+        df = pd.read_sql_query(
+            "SELECT * FROM ambulator_raw WHERE year=? AND month=?",
+            conn,
+            params=(year, month)
+        )
+    except Exception:
+        conn.close()
+        return pd.DataFrame(columns=["service_name", "main_group", "qty", "amount"])
+    conn.close()
+
+    if df.empty:
+        return pd.DataFrame(columns=["service_name", "main_group", "qty", "amount"])
+
+    for c in ["service_name", "qty", "amount"]:
+        if c not in df.columns:
+            df[c] = "" if c == "service_name" else 0.0
+
+    df["service_name"] = df["service_name"].astype(str).str.strip()
+    df["qty"] = pd.to_numeric(df["qty"], errors="coerce").fillna(0.0)
+    df["amount"] = pd.to_numeric(df["amount"], errors="coerce").fillna(0.0)
+
+    # _attach_main_group_amb ni ichki funksiya sifatida
+    conn2 = get_conn()
+    try:
+        m = pd.read_sql_query(
+            "SELECT service_name, main_group_name FROM service_main_group WHERE module='ambulator'",
+            conn2
+        )
+    except Exception:
+        conn2.close()
+        df["main_group"] = "Guruhsiz"
+        return df
+    conn2.close()
+
+    if m.empty:
+        df["main_group"] = "Guruhsiz"
+    else:
+        df2 = df.merge(m, on="service_name", how="left")
+        df2["main_group"] = df2["main_group_name"].fillna("Guruhsiz")
+        df2.drop(columns=["main_group_name"], inplace=True, errors="ignore")
+        df = df2
+
+    out = df.groupby(["main_group", "service_name"], as_index=False).agg(
+        xizmat_soni=("qty", "sum"),
+        tushum=("amount", "sum"),
+    )
+    out = out.sort_values("tushum", ascending=False).reset_index(drop=True)
+    return out
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _load_statsionar_drug_cached(year: int, month: int) -> pd.DataFrame:
+    """Keshlangan statsionar dori"""
     conn = get_conn()
     try:
         df = pd.read_sql_query(
@@ -292,12 +405,13 @@ def _load_statsionar_drug_by_department(year: int, month: int) -> pd.DataFrame:
     df["dori_sum"] = pd.to_numeric(df["dori_sum"], errors="coerce").fillna(0.0)
     df = df[df["department"].str.strip() != ""].copy()
     df = df[df["dori_sum"] > 0].copy()
-
     df = df.rename(columns={"department": "Bo‘lim", "dori_sum": "Dori-darmon"})
     return df.groupby("Bo‘lim", as_index=False)["Dori-darmon"].sum()
 
 
-def _load_opd_drug_for_kunduzgi(year: int, month: int) -> pd.DataFrame:
+@st.cache_data(ttl=3600, show_spinner=False)
+def _load_opd_drug_cached(year: int, month: int) -> pd.DataFrame:
+    """Keshlangan OPD dori"""
     conn = get_conn()
     try:
         df = pd.read_sql_query(
@@ -338,33 +452,19 @@ def _load_opd_drug_for_kunduzgi(year: int, month: int) -> pd.DataFrame:
     })
 
 
-def _load_jami_other_drugs(jami_df: pd.DataFrame, exclude_depts: list[str]) -> pd.DataFrame:
-    if jami_df is None or jami_df.empty:
-        return pd.DataFrame(columns=["Bo‘lim", "Dori-darmon"])
-
-    dept_col = "Бўлимлар номи "
-    drug_col = "ДОРИ-ДАРМОН"
-
-    if dept_col not in jami_df.columns or drug_col not in jami_df.columns:
-        return pd.DataFrame(columns=["Bo‘lim", "Dori-darmon"])
-
-    df = jami_df[[dept_col, drug_col]].copy()
-    df.columns = ["Bo‘lim", "Dori-darmon"]
-
-    df["Bo‘lim"] = df["Bo‘lim"].astype(str).apply(_norm_dept_name)
-    df["Dori-darmon"] = pd.to_numeric(df["Dori-darmon"], errors="coerce").fillna(0.0)
-
-    exclude_set = {_norm_dept_name(x) for x in exclude_depts}
-    df = df[~df["Bo‘lim"].isin(exclude_set)].copy()
-    df = df[df["Bo‘lim"].str.upper() != "MARKAZ"].copy()
-    df = df[df["Dori-darmon"] > 0].copy()
-
-    return df.groupby("Bo‘lim", as_index=False)["Dori-darmon"].sum()
+@st.cache_data(ttl=3600, show_spinner=False)
+def _load_jami_other_drugs_cached(jami_df_hash: str, exclude_depts_hash: str) -> pd.DataFrame:
+    """Bu funksiya alohida keshlanadi, lekin jami_df ni to'g'ridan-to'g'ri keshlab bo'lmaydi"""
+    # Asl funksiya chaqirilganda ishlatiladi
+    return pd.DataFrame(columns=["Bo‘lim", "Dori-darmon"])
 
 
+# =========================================================
+# DORI MANBALARI - KESHLANGAN
+# =========================================================
 def _build_final_drug_dashboard_df(year: int, month: int, jami_df: pd.DataFrame):
-    stats_df = _load_statsionar_drug_by_department(year, month)
-    opd_df = _load_opd_drug_for_kunduzgi(year, month)
+    stats_df = _load_statsionar_drug_cached(year, month)
+    opd_df = _load_opd_drug_cached(year, month)
 
     exclude_depts = []
     if not stats_df.empty:
@@ -372,9 +472,26 @@ def _build_final_drug_dashboard_df(year: int, month: int, jami_df: pd.DataFrame)
     if not opd_df.empty:
         exclude_depts.extend(opd_df["Bo‘lim"].tolist())
 
-    jami_other_df = _load_jami_other_drugs(jami_df, exclude_depts)
+    # Jami protokoldan qolgan dori ma'lumotlarini olish
+    if jami_df is not None and not jami_df.empty:
+        dept_col = "Бўлимлар номи "
+        drug_col = "ДОРИ-ДАРМОН"
+        if dept_col in jami_df.columns and drug_col in jami_df.columns:
+            other_df = jami_df[[dept_col, drug_col]].copy()
+            other_df.columns = ["Bo‘lim", "Dori-darmon"]
+            other_df["Bo‘lim"] = other_df["Bo‘lim"].astype(str).apply(_norm_dept_name)
+            other_df["Dori-darmon"] = pd.to_numeric(other_df["Dori-darmon"], errors="coerce").fillna(0.0)
+            exclude_set = {_norm_dept_name(x) for x in exclude_depts}
+            other_df = other_df[~other_df["Bo‘lim"].isin(exclude_set)].copy()
+            other_df = other_df[other_df["Bo‘lim"].str.upper() != "MARKAZ"].copy()
+            other_df = other_df[other_df["Dori-darmon"] > 0].copy()
+            other_df = other_df.groupby("Bo‘lim", as_index=False)["Dori-darmon"].sum()
+        else:
+            other_df = pd.DataFrame(columns=["Bo‘lim", "Dori-darmon"])
+    else:
+        other_df = pd.DataFrame(columns=["Bo‘lim", "Dori-darmon"])
 
-    final_df = pd.concat([stats_df, opd_df, jami_other_df], ignore_index=True)
+    final_df = pd.concat([stats_df, opd_df, other_df], ignore_index=True)
 
     if final_df.empty:
         return (
@@ -393,13 +510,13 @@ def _build_final_drug_dashboard_df(year: int, month: int, jami_df: pd.DataFrame)
 
     stats_sum = float(stats_df["Dori-darmon"].sum()) if not stats_df.empty else 0.0
     opd_sum = float(opd_df["Dori-darmon"].sum()) if not opd_df.empty else 0.0
-    other_sum = float(jami_other_df["Dori-darmon"].sum()) if not jami_other_df.empty else 0.0
+    other_sum = float(other_df["Dori-darmon"].sum()) if not other_df.empty else 0.0
 
     return final_df, stats_sum, opd_sum, other_sum
 
 
 # =========================================================
-# CHARTS
+# CHARTS (o'zgarmaydi)
 # =========================================================
 def _plot_vbar(df: pd.DataFrame, x_col: str, y_col: str, title: str = "", top_n: int = 12):
     if df is None or df.empty:
@@ -524,113 +641,6 @@ def _plot_donut(labels, values, title: str = ""):
 
 
 # =========================================================
-# AMBULATOR TOP XIZMATLAR
-# =========================================================
-def _attach_main_group_amb(df: pd.DataFrame) -> pd.DataFrame:
-    conn = get_conn()
-    try:
-        m = pd.read_sql_query(
-            "SELECT service_name, main_group_name FROM service_main_group WHERE module='ambulator'",
-            conn
-        )
-    except Exception:
-        conn.close()
-        df["main_group"] = "Guruhsiz"
-        return df
-    conn.close()
-
-    if m.empty:
-        df["main_group"] = "Guruhsiz"
-        return df
-
-    df2 = df.merge(m, on="service_name", how="left")
-    df2["main_group"] = df2["main_group_name"].fillna("Guruhsiz")
-    df2.drop(columns=["main_group_name"], inplace=True, errors="ignore")
-    return df2
-
-
-def _load_ambulator_top_services(year: int, month: int) -> pd.DataFrame:
-    conn = get_conn()
-    try:
-        df = pd.read_sql_query(
-            "SELECT * FROM ambulator_raw WHERE year=? AND month=?",
-            conn,
-            params=(year, month)
-        )
-    except Exception:
-        conn.close()
-        return pd.DataFrame(columns=["service_name", "main_group", "qty", "amount"])
-    conn.close()
-
-    if df.empty:
-        return pd.DataFrame(columns=["service_name", "main_group", "qty", "amount"])
-
-    for c in ["service_name", "qty", "amount"]:
-        if c not in df.columns:
-            df[c] = "" if c == "service_name" else 0.0
-
-    df["service_name"] = df["service_name"].astype(str).str.strip()
-    df["qty"] = pd.to_numeric(df["qty"], errors="coerce").fillna(0.0)
-    df["amount"] = pd.to_numeric(df["amount"], errors="coerce").fillna(0.0)
-
-    df = _attach_main_group_amb(df)
-
-    out = df.groupby(["main_group", "service_name"], as_index=False).agg(
-        xizmat_soni=("qty", "sum"),
-        tushum=("amount", "sum"),
-    )
-    out = out.sort_values("tushum", ascending=False).reset_index(drop=True)
-    return out
-
-
-# =========================================================
-# POLIKLINIKA TOP VRACHLAR
-# =========================================================
-def _build_poliklinika_dashboard_data(year: int, month: int):
-    df_all = _load_cached_std(year, month)
-    if df_all is None or df_all.empty:
-        return pd.DataFrame(columns=["doctor_display", "Jami xizmat summasi", "Jami protokol summasi", "Yakuniy protokol"])
-
-    registry = _build_doctor_registry(df_all)
-
-    amb_exec_preview = _preview_exec_amb(df_all, registry)
-    amb_ref_preview = _preview_ref_amb(df_all, registry)
-    stat_exec_preview = _preview_exec_stat(df_all, registry)
-
-    sel_amb_exec = _load_selected_services(year, month, "amb_exec")
-    sel_amb_ref = _load_selected_services(year, month, "amb_ref")
-    sel_stat_exec = _load_selected_services(year, month, "stat_exec")
-
-    rules_amb_exec = _load_rules(year, month, "amb_exec")
-    rules_amb_ref = _load_rules(year, month, "amb_ref")
-    rules_stat_exec = _load_rules(year, month, "stat_exec")
-
-    manual_df = _load_manual_extra(year, month)
-
-    sum_ae, _ = _build_source_summary(amb_exec_preview, sel_amb_exec, rules_amb_exec, "Ambulator ijrochi")
-    sum_ar, _ = _build_source_summary(amb_ref_preview, sel_amb_ref, rules_amb_ref, "Ambulator yo‘naltirgan")
-    sum_se, _ = _build_source_summary(stat_exec_preview, sel_stat_exec, rules_stat_exec, "Statsionar ijrochi")
-
-    unified = _merge_three_sources(sum_ae, sum_ar, sum_se)
-    unified = _apply_manual_extra(unified, manual_df)
-
-    if not unified.empty:
-        unified = unified[pd.to_numeric(unified["Jami protokol summasi"], errors="coerce").fillna(0) > 0].copy()
-
-    doctors_df = unified[[
-        "doctor_display",
-        "Jami xizmat summasi",
-        "Jami protokol summasi",
-        "Yakuniy protokol",
-    ]].copy() if not unified.empty else pd.DataFrame(columns=[
-        "doctor_display", "Jami xizmat summasi", "Jami protokol summasi", "Yakuniy protokol"
-    ])
-
-    doctors_df = doctors_df.sort_values("Jami protokol summasi", ascending=False).reset_index(drop=True)
-    return doctors_df
-
-
-# =========================================================
 # EXCEL
 # =========================================================
 def _export_excel(
@@ -700,31 +710,70 @@ def _export_excel(
 
 
 # =========================================================
-# MAIN
+# MAIN - TEZLASHTIRILGAN
 # =========================================================
 def render_dashboard(year: int, month_name: str, uz_months: list[str]):
     _inject_css()
 
     month = uz_months.index(month_name) + 1
-
+    
+    # ===== YANGI: Dashboard caching =====
+    dashboard_cache_key = f"dashboard_{year}_{month}"
+    
+    if dashboard_cache_key in st.session_state:
+        # Keshdan olish
+        df = st.session_state[f"{dashboard_cache_key}_df"]
+        tax = st.session_state[f"{dashboard_cache_key}_tax"]
+        support = st.session_state[f"{dashboard_cache_key}_support"]
+        drug_df = st.session_state[f"{dashboard_cache_key}_drug"]
+        stats_dori_sum = st.session_state[f"{dashboard_cache_key}_stats_dori"]
+        opd_dori_sum = st.session_state[f"{dashboard_cache_key}_opd_dori"]
+        other_dori_sum = st.session_state[f"{dashboard_cache_key}_other_dori"]
+        jami_dori = st.session_state[f"{dashboard_cache_key}_jami_dori"]
+        doctors_df = st.session_state[f"{dashboard_cache_key}_doctors"]
+        services_df = st.session_state[f"{dashboard_cache_key}_services"]
+        
+        # Keshdan olinganligini ko'rsatish
+        st.caption(f"⚡ Keshdan yuklandi: {year} {month_name}")
+    else:
+        # Yangi hisoblash - birinchi marta
+        with st.spinner("Ma'lumotlar yuklanmoqda..."):
+            df = _load_jami_table_cached(year, month)
+            tax = _load_tax_settings_cached(year, month)
+            support = _load_support_finance_cached(year, month)
+            
+            drug_result = _build_final_drug_dashboard_df(year, month, df)
+            drug_df, stats_dori_sum, opd_dori_sum, other_dori_sum = drug_result
+            jami_dori = _safe_sum(drug_df, "Dori-darmon") if not drug_df.empty else 0.0
+            
+            doctors_df = _load_poliklinika_doctors_cached(year, month)
+            services_df = _load_ambulator_top_services_cached(year, month)
+            
+            # Keshlash
+            st.session_state[dashboard_cache_key] = True
+            st.session_state[f"{dashboard_cache_key}_df"] = df
+            st.session_state[f"{dashboard_cache_key}_tax"] = tax
+            st.session_state[f"{dashboard_cache_key}_support"] = support
+            st.session_state[f"{dashboard_cache_key}_drug"] = drug_df
+            st.session_state[f"{dashboard_cache_key}_stats_dori"] = stats_dori_sum
+            st.session_state[f"{dashboard_cache_key}_opd_dori"] = opd_dori_sum
+            st.session_state[f"{dashboard_cache_key}_other_dori"] = other_dori_sum
+            st.session_state[f"{dashboard_cache_key}_jami_dori"] = jami_dori
+            st.session_state[f"{dashboard_cache_key}_doctors"] = doctors_df
+            st.session_state[f"{dashboard_cache_key}_services"] = services_df
+    
     st.markdown('<div class="db-title">📊 Boshqaruv paneli</div>', unsafe_allow_html=True)
     st.markdown(
         '<div class="db-subtitle">Asosiy moliyaviy ko‘rsatkichlar, bo‘limlar reytingi, dori tahlili, top xizmatlar va vrachlar</div>',
         unsafe_allow_html=True,
     )
 
-    try:
-        df = _build_jami_table(year, month)
-    except Exception as e:
-        st.error(f"Dashboard ma’lumotini olishda xatolik: {e}")
-        return
-
     if df.empty:
         st.warning("Tanlangan oy uchun ma’lumot topilmadi.")
         return
 
+    # ===== QOLGAN HISOBLAR (o'zgarmaydi) =====
     df["Бўлимлар номи "] = df["Бўлимлар номи "].astype(str).str.strip()
-
     markaz_row = df[df["Бўлимлар номи "].str.upper() == "MARKAZ"].copy()
     main_depts = df[df["Бўлимлар номи "].str.upper() != "MARKAZ"].copy()
 
@@ -739,17 +788,11 @@ def render_dashboard(year: int, month_name: str, uz_months: list[str]):
         df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0.0)
         main_depts[c] = pd.to_numeric(main_depts[c], errors="coerce").fillna(0.0)
 
-    tax = _load_tax_settings(year, month)
-    support = _load_support_finance(year, month)
-
     jami_ish = _safe_sum(df, "ЖАМИ ҚИЛГАН ИШИ")
     asosiy_yakuniy_protokol = _safe_sum(main_depts, "ЯКУНИЙ ПРОТОКОЛ")
     yordamchi_protokol = _safe_sum(support, "protokol")
     jami_protokol = asosiy_yakuniy_protokol + yordamchi_protokol
     markaz_baza = _safe_sum(markaz_row, "ЯКУНИЙ ПРОТОКОЛ")
-
-    drug_df, stats_dori_sum, opd_dori_sum, other_dori_sum = _build_final_drug_dashboard_df(year, month, df)
-    jami_dori = _safe_sum(drug_df, "Dori-darmon")
 
     main_tax_df = main_depts[["Бўлимлар номи ", "ИШ ХАҚҚИ ОКЛАД (АВАНС)", "ЯКУНИЙ ПРОТОКОЛ", "ЖАМИ ПРОТОКОЛ СУММАСИ"]].copy()
     main_tax_df.columns = ["Bo‘lim", "Avans", "Yakuniy protokol", "Jami protokol"]
@@ -779,9 +822,6 @@ def render_dashboard(year: int, month_name: str, uz_months: list[str]):
     qolgan_summa = markaz_baza - yordamchi_oylik - jami_soliq - tax["kommunal"] - tax["other"]
     markaz_soliq = max(qolgan_summa, 0.0) * tax["markaz_tax"] / 100
     sof_foyda = qolgan_summa - markaz_soliq
-
-    doctors_df = _build_poliklinika_dashboard_data(year, month)
-    services_df = _load_ambulator_top_services(year, month)
 
     dept_rank_df = main_depts[["Бўлимлар номи ", "ЖАМИ ҚИЛГАН ИШИ", "ЯКУНИЙ ПРОТОКОЛ"]].copy()
     dept_rank_df.columns = ["Bo‘lim", "Jami ish", "Yakuniy protokol"]
